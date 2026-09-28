@@ -11,7 +11,6 @@ function App() {
   const [events, setEvents] = useState([]);
   const [registrations, setRegistrations] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [connected, setConnected] = useState(false);
   const [notification, setNotification] = useState(null);
 
   // Student portal states
@@ -30,6 +29,7 @@ function App() {
   // Student check-registration lookup
   const [studentLookupEmail, setStudentLookupEmail] = useState("");
   const [myRegistrations, setMyRegistrations] = useState(null);
+  const [searchingBookings, setSearchingBookings] = useState(false);
 
   // Organizer portal states
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -79,11 +79,9 @@ function App() {
 
       setEvents(Array.isArray(eventsData) ? eventsData : []);
       setRegistrations(Array.isArray(regData) ? regData : []);
-      setConnected(true);
     } catch (err) {
       console.error(err);
-      setConnected(false);
-      showToast("Cannot connect to Spring Boot backend on port 8080.", "error");
+      showToast("Cannot connect to backend server. Make sure it is running.", "error");
     } finally {
       setLoading(false);
     }
@@ -180,11 +178,11 @@ function App() {
 
   // Student check registrations
   async function handleLookupMyRegistrations(e) {
-    e.preventDefault();
+    if (e) e.preventDefault();
     if (!studentLookupEmail.trim()) return;
 
     try {
-      // Find student by email
+      setSearchingBookings(true);
       const studentRes = await fetch(`${API}/students/email/${encodeURIComponent(studentLookupEmail.trim().toLowerCase())}`);
       if (!studentRes.ok) {
         setMyRegistrations([]);
@@ -199,6 +197,32 @@ function App() {
       }
     } catch (err) {
       showToast("Error retrieving your registrations", "error");
+    } finally {
+      setSearchingBookings(false);
+    }
+  }
+
+  // Student cancel registration
+  async function handleStudentCancelRegistration(regId) {
+    if (!window.confirm("Are you sure you want to cancel your event registration? Your seat will be freed immediately.")) {
+      return;
+    }
+    try {
+      const res = await fetch(`${API}/registrations/${regId}/cancel`, {
+        method: "PUT",
+      });
+      if (res.ok) {
+        showToast("Your registration has been cancelled successfully. Seat freed up!");
+        loadAllData();
+        if (studentLookupEmail.trim()) {
+          handleLookupMyRegistrations();
+        }
+      } else {
+        const err = await res.text();
+        showToast(err || "Failed to cancel registration.", "error");
+      }
+    } catch (err) {
+      showToast("Error cancelling registration.", "error");
     }
   }
 
@@ -340,10 +364,6 @@ function App() {
         </div>
 
         <div className="nav-actions">
-          <span className={`status-pill ${connected ? "online" : "offline"}`}>
-            <span className="status-dot"></span>
-            {connected ? "API Connected (:8080)" : "Disconnected"}
-          </span>
           <button className="nav-button" onClick={loadAllData} title="Refresh live data">
             ↻ Refresh
           </button>
@@ -374,7 +394,7 @@ function App() {
               </h1>
               <p>
                 Browse campus hackathons, symposiums, cultural fests, and workshops.
-                Register directly with your Student Name, Email, and College.
+                Register with your Student Name, Email, and College, or manage your existing bookings.
               </p>
 
               {/* SEARCH BOX */}
@@ -511,14 +531,14 @@ function App() {
             )}
           </section>
 
-          {/* MY REGISTRATIONS LOOKUP */}
+          {/* MY REGISTRATIONS LOOKUP WITH CANCELLATION */}
           <section className="section dark-section" id="my-registrations">
             <div className="section-heading">
               <div>
                 <span className="section-label">STUDENT DASHBOARD</span>
-                <h2>Check My Registrations</h2>
-                <p style={{ color: "#8d8d99", marginTop: "6px" }}>
-                  Already registered? Enter your email to view your event passes and booking status.
+                <h2>Check or Cancel My Registrations</h2>
+                <p style={{ color: "#64748b", marginTop: "6px" }}>
+                  Already registered? Enter your email to view your booking pass, check status, or cancel a registration.
                 </p>
               </div>
             </div>
@@ -531,8 +551,8 @@ function App() {
                 value={studentLookupEmail}
                 onChange={(e) => setStudentLookupEmail(e.target.value)}
               />
-              <button type="submit" className="primary-button">
-                Check My Bookings
+              <button type="submit" className="primary-button" disabled={searchingBookings}>
+                {searchingBookings ? "Searching..." : "Check My Bookings"}
               </button>
             </form>
 
@@ -549,7 +569,8 @@ function App() {
                           <th>Event Name</th>
                           <th>College & Venue</th>
                           <th>Date & Time</th>
-                          <th>Status</th>
+                          <th>Booking Status</th>
+                          <th>Action</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -563,6 +584,19 @@ function App() {
                               <span className={`status-tag ${r.status?.toLowerCase()}`}>
                                 {r.status}
                               </span>
+                            </td>
+                            <td>
+                              {r.status === "REGISTERED" ? (
+                                <button
+                                  className="btn-cancel"
+                                  onClick={() => handleStudentCancelRegistration(r.id)}
+                                  title="Cancel your registration and free your seat"
+                                >
+                                  Cancel Registration
+                                </button>
+                              ) : (
+                                <span className="cancelled-note">Cancelled</span>
+                              )}
                             </td>
                           </tr>
                         ))}
@@ -726,9 +760,9 @@ function App() {
             {/* EVENT DETAILS PREVIEW */}
             <div className="reg-event-preview">
               <span className="badge">EVENT DETAILS</span>
-              <h4 style={{ fontSize: "19px", marginTop: "6px" }}>{selectedEvent.title}</h4>
+              <h4 style={{ fontSize: "18px", marginTop: "4px", color: "#0369a1" }}>{selectedEvent.title}</h4>
               {selectedEvent.description && (
-                <p style={{ color: "#a5a5b1", fontSize: "13px", marginTop: "4px" }}>
+                <p style={{ color: "#475569", fontSize: "13px", marginTop: "4px" }}>
                   {selectedEvent.description}
                 </p>
               )}
@@ -736,9 +770,9 @@ function App() {
                 <div>🏛️ <strong>College:</strong> {selectedEvent.college || selectedEvent.organizer?.college || "Campus"}</div>
                 <div>📍 <strong>Venue:</strong> {selectedEvent.venue}</div>
                 <div>📅 <strong>Date & Time:</strong> {selectedEvent.date} {selectedEvent.time ? `at ${selectedEvent.time}` : ""}</div>
-                <div>👥 <strong>Seat Capacity:</strong> {getEventRegCount(selectedEvent.id)} / {selectedEvent.maxSeats} Registered</div>
+                <div>👥 <strong>Seats:</strong> {getEventRegCount(selectedEvent.id)} / {selectedEvent.maxSeats} Registered</div>
                 {selectedEvent.registrationCloseTime && (
-                  <div>⏳ <strong>Registration Deadline:</strong> {new Date(selectedEvent.registrationCloseTime).toLocaleString()}</div>
+                  <div>⏳ <strong>Deadline:</strong> {new Date(selectedEvent.registrationCloseTime).toLocaleString()}</div>
                 )}
                 {selectedEvent.organizer && (
                   <div>🏢 <strong>Organizer:</strong> {selectedEvent.organizer.personName || selectedEvent.organizer.name} ({selectedEvent.organizer.email})</div>
@@ -751,6 +785,35 @@ function App() {
               <div className={`status-result-box ${regStatusResult.type}`}>
                 <span>{regStatusResult.type === "error" ? "❌ Error:" : "✅ Success:"}</span>
                 <p>{regStatusResult.message}</p>
+                {regStatusResult.message?.toLowerCase().includes("already registered") && (
+                  <button
+                    type="button"
+                    className="btn-cancel"
+                    style={{ marginTop: "10px", alignSelf: "flex-start" }}
+                    onClick={async () => {
+                      const studentEmail = regForm.email.trim().toLowerCase();
+                      try {
+                        const sRes = await fetch(`${API}/students/email/${encodeURIComponent(studentEmail)}`);
+                        if (sRes.ok) {
+                          const std = await sRes.json();
+                          const regRes = await fetch(`${API}/registrations/student/${std.id}/event/${selectedEvent.id}`);
+                          if (regRes.ok) {
+                            const reg = await regRes.json();
+                            await handleStudentCancelRegistration(reg.id);
+                            setRegStatusResult({
+                              type: "success",
+                              message: "Your registration was cancelled. Your seat has been freed.",
+                            });
+                          }
+                        }
+                      } catch {
+                        showToast("Could not cancel registration.", "error");
+                      }
+                    }}
+                  >
+                    Cancel Existing Booking
+                  </button>
+                )}
               </div>
             )}
 
@@ -997,7 +1060,7 @@ function App() {
             <div className="modal-header">
               <div>
                 <h3>Registered Participants</h3>
-                <p style={{ color: "#a5a5b1", fontSize: "14px" }}>
+                <p style={{ color: "#64748b", fontSize: "14px" }}>
                   {selectedEventForViewRegs.title} ({eventRegistrations.length} students)
                 </p>
               </div>
@@ -1067,8 +1130,8 @@ function App() {
           <span className="logo-icon">E</span>
           EventEase
         </div>
-        <p>Spring Boot REST API + React Frontend • Student & Organizer Workflow</p>
-        <span>© 2026 EventEase • Running on http://localhost:8080</span>
+        <p>Campus Event Management & Registration Platform</p>
+        <span>© 2026 EventEase</span>
       </footer>
     </div>
   );
